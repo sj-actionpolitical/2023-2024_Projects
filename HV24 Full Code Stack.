@@ -1,0 +1,143 @@
+
+Create or replace table `general-data1.HV24.HD35_2023` as 
+SELECT
+  a.AbsDeliveryDate, a.AbsenteeRequestStatus,a.AbsReqDate,a.AbsReturnDate, b.*
+FROM
+  `general-data1.HV24.HD35_DailyVBM` a
+LEFT JOIN
+  `general-data1.VF_2023.VF_October2023` b
+ON (a.FVRSVoterIdNumber = b.Voter_ID)
+where b.House_District = "35";
+
+create or replace table `general-data1.HV24.Running_HD35_VBM_Count` as 
+Select * FROM `general-data1.HV24.Running_HD35_VBM_Count` 
+UNION ALL
+SELECT Party_Affiliation, CURRENT_DATE() as Date, COUNT(Distinct Voter_ID) as count FROM `general-data1.HV24.HD35_2023`  group by Party_Affiliation, Date;
+
+create or replace table `general-data1.HV24.Running_HD35_VBM_Count_DvR_Percent` as 
+Select Date, Sum(count) as Daily_Total_VBM from `general-data1.HV24.Running_HD35_VBM_Count` group by Date;
+
+create or replace table `general-data1.HV24.Running_HD35_VBM_Count_DvR_Percent` as 
+SELECT
+  a.*, (a.count / b.Daily_total_VBM) as Percentage
+FROM
+  `general-data1.HV24.Running_HD35_VBM_Count` a
+LEFT JOIN
+  `general-data1.HV24.Running_HD35_VBM_Count_DvR_Percent` b
+ON
+  a.Date = b.Date
+
+order by Date Desc;
+
+
+
+Create or Replace table `general-data1.HV24.Phones_EnrollmentV1_VBM_matched` as 
+SELECT
+  a.*,
+  CASE
+    WHEN b.Voter_ID IS NULL THEN 'No'
+  ELSE
+  'Yes VBM'
+  END AS HAS_VBM
+FROM
+  `general-data1.HV24.Phones_Enrollment_UniverseV1` a
+LEFT JOIN
+  `general-data1.HV24.HD35_2023` b
+ON
+a.StateFileID = b.Voter_ID;
+
+create or replace table `general-data1.HV24.Combined_Patch_Throughs` as 
+select StateFileID, CountyName, cast(status_date as STRING) as status_date, status_code, last_dialer_load, QT1 FROM `general-data1.HV24.ORA_Patch_ThroughsV2` where status_code <> "SU"
+union all
+select StateFileID, CountyName, cast(status_date as STRING) as status_date, status_code, last_dialer_load, QT1  FROM `general-data1.HV24.OSC_Patch_ThroughsV2` where status_code <> "SU"
+union all 
+select StateFileID, CountyName, cast(status_date as STRING) as status_date, status_code, last_dialer_load, QT1  FROM `general-data1.HV24.OSC_Patch_Throughs`
+union all 
+select StateFileID, CountyName, cast(status_date as STRING) as status_date, status_code, last_dialer_load, QT1  FROM `general-data1.HV24.ORA_Patch_Throughs`;
+
+
+create or replace table `general-data1.HV24.Phones_EnrollmentV1_VBM_matched_Patch_Matched` as 
+select a.*, b.status_date, b.status_code, b.last_dialer_load, b.QT1 FROM `general-data1.HV24.Phones_EnrollmentV1_VBM_matched` a left join `general-data1.HV24.Combined_Patch_Throughs` b 
+on a.StateFileID = b.StateFileID;
+
+create or replace table `general-data1.HV24.HV24_HD35_DoorTargetCounts_v1` as 
+SELECT cast(PrecinctName as STRING) as Precinct, count(distinct Address) as Total_Door_Universes_v1 FROM `general-data1.HV24.HV24_WalkUniverseV1` group by Precinct;
+
+create or replace table `general-data1.HV24.HV24_HD35_DoorTargetCounts_v1` as 
+SELECT a.*, b.GEOM, b.COUNTY FROM `general-data1.HV24.HV24_HD35_DoorTargetCounts_v1` a Left join `general-data1.Precinct_Geometries.ORA_OSC_2023_Combined` b 
+on a.Precinct = b.Precinct;
+
+Create or Replace table `general-data1.HV24.HV24_Contact_address_Joined` as 
+SELECT
+  a.*,
+  b.Address, b.PrecinctName, b.CountyName
+FROM
+  `general-data1.HV24.HV24_Contact` a
+LEFT JOIN
+  `general-data1.HV24.HV24_WalkUniverseV1` b
+ON
+  a.Voter_File_VANID = b.Voter_File_VANID;
+
+Create or Replace table `general-data1.HV24.HV24_Total_VBM_Doors_knockedV1` as
+SELECT cast(PrecinctName as STRING) as Precinct, count(distinct Address) as Total_Doors_Knocked FROM `general-data1.HV24.HV24_Contact_address_Joined` group by Precinct;
+
+Create or Replace table `general-data1.HV24.HV24_CanvasserLeaderBoard` as
+SELECT Canvassed_By, Date_Canvassed, count(distinct Address) as Total_Doors_Knocked FROM `general-data1.HV24.HV24_Contact_address_Joined` group by Canvassed_By, Date_Canvassed;
+
+create or replace table `general-data1.HV24.HV24_HD35_DoorTargetCounts_v1` as 
+select a.*,b.Total_Doors_Knocked, (b.Total_Doors_Knocked / a.Total_Door_Universes_v1) as Percent_Complete from `general-data1.HV24.HV24_HD35_DoorTargetCounts_v1` a left join `general-data1.HV24.HV24_Total_VBM_Doors_knockedV1` b on a.Precinct = b.Precinct;
+
+CREATE OR REPLACE TABLE
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` AS
+SELECT
+  a.*,
+  b.Survey_Response
+FROM
+  `general-data1.HV24.HV24_WalkUniverseV1` a
+LEFT JOIN
+  `general-data1.HV24.HV24_Survey` b
+ON
+  a.Voter_File_VANID = b.Voter_File_VANID
+  and b.Survey_Question_Name = "HD35_VBM Sign Up" or b.Survey_Question_Name is null;
+
+ CREATE OR REPLACE TABLE
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` AS
+SELECT
+  a.*,
+  b.Result as Walk_Contact_result
+FROM
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` a
+LEFT JOIN
+  `general-data1.HV24.HV24_Contact` b
+ON
+  a.Voter_File_VANID = b.Voter_File_VANID;
+
+ CREATE OR REPLACE TABLE
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` AS
+SELECT
+  a.*,
+  b.QT1 as call_response 
+FROM
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` a
+LEFT JOIN
+  `general-data1.HV24.Combined_Patch_Throughs` b
+ON
+  a.StateFileID = b.StateFileID and b.QT1 is not null;
+   CREATE OR REPLACE TABLE
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` AS
+SELECT
+  a.*,
+ CASE
+    WHEN b.Voter_ID IS NULL THEN 'No'
+  ELSE
+  'Yes VBM'
+  END AS HAS_VBM  
+FROM
+  `general-data1.HV24.HV24_WalkUniverseV1_Results_VBM_Joined` a
+LEFT JOIN
+  `general-data1.HV24.HD35_2023` b
+ON
+  a.StateFileID = b.Voter_ID
+
+
+
